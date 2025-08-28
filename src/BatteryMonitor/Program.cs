@@ -18,7 +18,7 @@ if (options.ShowHelp)
 BatteryInterop.BatteryDevice[] batteries;
 try
 {
-    batteries = BatteryInterop.EnumerateBatteries();
+    batteries = BatteryInterop.EnumerateBatteries(options.Debug);
 }
 catch (Exception ex)
 {
@@ -28,7 +28,83 @@ catch (Exception ex)
 
 if (batteries.Length == 0)
 {
-    WriteLine("No batteries found.");
+    var wmiList = WmiBatteryProvider.Query().ToList();
+    var winrt = WinRtBatteryProvider.QueryAggregate();
+    if (wmiList.Count == 0 && winrt == null)
+    {
+        WriteLine("No batteries found (native, legacy, WMI, WinRT)." );
+        return;
+    }
+    if (winrt != null)
+    {
+        WriteLine("WinRT Aggregate Battery:");
+        WriteLine($"  Charge %     : {winrt.ChargePercent}");
+        WriteLine($"  FullCap mWh  : {winrt.FullChargeCapacityMah}");
+        WriteLine($"  Remain mWh   : {winrt.RemainingCapacityMah}");
+        WriteLine();
+    }
+    if (wmiList.Count > 0)
+    {
+        WriteLine("WMI Battery (fallback):");
+        foreach (var wb in wmiList)
+        {
+            WriteLine($"  {wb.Name} ({wb.DeviceId}) %={wb.EstimatedChargeRemaining?.ToString() ?? "?"} runtimeMin={wb.EstimatedRunTimeMinutes?.ToString() ?? "?"} status={wb.BatteryStatus?.ToString() ?? "?"} volt(mV)={wb.DesignVoltageMv?.ToString() ?? "?"}");
+        }
+        WriteLine();
+    }
+    if (options.Once) return;
+    CsvLogger? csvFallback = null;
+    if (!string.IsNullOrWhiteSpace(options.CsvPath)) { try { csvFallback = new CsvLogger(options.CsvPath!); csvFallback.WriteHeaderIfNew(); } catch (Exception ex) { WriteLine($"CSV init failed: {ex.Message}"); } }
+    MetricsServer? metricsFallback = null;
+    if (options.HttpPort.HasValue) { try { metricsFallback = new MetricsServer(options.HttpPort.Value); metricsFallback.Start(); } catch (Exception ex) { WriteLine($"Metrics server failed: {ex.Message}"); } }
+    var ctsFallback = new CancellationTokenSource();
+    Console.CancelKeyPress += (s,e)=>{ e.Cancel = true; ctsFallback.Cancel(); };
+    WriteLine($"Polling fallback providers every {options.IntervalSeconds}s (Ctrl+C to exit) ...\n");
+    while (!ctsFallback.IsCancellationRequested)
+    {
+        var ts = DateTime.UtcNow;
+        var agg = WinRtBatteryProvider.QueryAggregate();
+        if (agg != null)
+        {
+            WriteLine($"[{ts:HH:mm:ss}] WinRT: pct={agg.ChargePercent} remain={agg.RemainingCapacityMah}mWh full={agg.FullChargeCapacityMah}mWh");
+        }
+        var list = WmiBatteryProvider.Query().ToList();
+        foreach (var wb in list)
+        {
+            WriteLine($"[{ts:HH:mm:ss}] WMI: {wb.Name} pct={wb.EstimatedChargeRemaining?.ToString() ?? "?"} runtime={wb.EstimatedRunTimeMinutes?.ToString() ?? "?"} status={wb.BatteryStatus?.ToString() ?? "?"}");
+        }
+    if (metricsFallback != null)
+        {
+            if (agg != null)
+            {
+                var staticAgg = new BatteryInterop.BatteryStaticInfo("WinRTAggregate", null, null, "WinRTAggregate", null, 0, (uint)agg.FullChargeCapacityMah, null, null);
+                var dynAgg = new BatteryInterop.BatteryDynamicStatus(ts, "WinRTAggregate", (uint)agg.RemainingCapacityMah, 0, 0, 0);
+        metricsFallback.UpdateSample(staticAgg, dynAgg, null, null);
+            }
+            foreach (var wb in list)
+            {
+                var pseudoStatic = new BatteryInterop.BatteryStaticInfo(wb.DeviceId, null, null, wb.Name, null, 0, 0, null, null);
+                var pseudoDynamic = new BatteryInterop.BatteryDynamicStatus(ts, wb.DeviceId, (uint)(wb.EstimatedChargeRemaining ?? 0), 0, (uint)(wb.DesignVoltageMv ?? 0), 0);
+        metricsFallback.UpdateSample(pseudoStatic, pseudoDynamic, null, null);
+            }
+        }
+    if (csvFallback != null)
+        {
+            if (agg != null)
+            {
+                var staticAgg = new BatteryInterop.BatteryStaticInfo("WinRTAggregate", null, null, "WinRTAggregate", null, 0, (uint)agg.FullChargeCapacityMah, null, null);
+                var dynAgg = new BatteryInterop.BatteryDynamicStatus(ts, "WinRTAggregate", (uint)agg.RemainingCapacityMah, 0, 0, 0);
+        csvFallback.WriteSample(ts, staticAgg, dynAgg, null, null);
+            }
+            foreach (var wb in list)
+            {
+                var pseudoStatic = new BatteryInterop.BatteryStaticInfo(wb.DeviceId, null, null, wb.Name, null, 0, 0, null, null);
+                var pseudoDynamic = new BatteryInterop.BatteryDynamicStatus(ts, wb.DeviceId, (uint)(wb.EstimatedChargeRemaining ?? 0), 0, (uint)(wb.DesignVoltageMv ?? 0), 0);
+        csvFallback.WriteSample(ts, pseudoStatic, pseudoDynamic, null, null);
+            }
+        }
+    for (int i=0;i<options.IntervalSeconds*10 && !ctsFallback.IsCancellationRequested;i++) Thread.Sleep(100);
+    }
     return;
 }
 
@@ -159,7 +235,7 @@ while (!cts.IsCancellationRequested)
     {
         try
         {
-            var newDevices = BatteryInterop.EnumerateBatteries();
+            var newDevices = BatteryInterop.EnumerateBatteries(options.Debug);
             // merge: replace arrays & static info list
             batteries = newDevices;
             staticInfos.Clear();
@@ -203,7 +279,8 @@ record CliOptions(
     bool Once,
     double AlertHighTempC,
     double AlertLowHealthPct,
-    int ReenumerateEvery)
+    int ReenumerateEvery,
+    bool Debug)
 {
     public static string HelpText => @"Options:
   --interval <sec>       Polling interval seconds (default 5)
@@ -213,7 +290,8 @@ record CliOptions(
   --high-temp <C>        Alert threshold temperature (default 50)
   --low-health <pct>     Alert threshold health percent (default 80)
     --reenum <n>           Re-enumerate batteries every n polling cycles (0=never)
-    --help                 Show this help";
+        --debug                Verbose enumeration debug output
+        --help                 Show this help";
 
     public static CliOptions Parse(string[] args)
     {
@@ -225,6 +303,7 @@ record CliOptions(
         double lowHealth = 80;
     bool help = false;
     int reenum = 0;
+    bool debug = false;
 
         for (int i = 1; i < args.Length; i++)
         {
@@ -237,10 +316,11 @@ record CliOptions(
                 case "--high-temp" when i + 1 < args.Length && double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var ht): highTemp = ht; i++; break;
                 case "--low-health" when i + 1 < args.Length && double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var lh): lowHealth = lh; i++; break;
                 case "--reenum" when i + 1 < args.Length && int.TryParse(args[i + 1], out var rn): reenum = Math.Max(0, rn); i++; break;
+                case "--debug": debug = true; break;
                 case "--help": help = true; break;
             }
         }
-    return new CliOptions(help, interval, csv, http, once, highTemp, lowHealth, reenum);
+    return new CliOptions(help, interval, csv, http, once, highTemp, lowHealth, reenum, debug);
     }
 }
 
