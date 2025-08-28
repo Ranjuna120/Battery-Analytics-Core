@@ -6,7 +6,7 @@ using System.Text;
 namespace BatteryAnalytics.Core;
 
 // Low-level Windows Battery Class Driver interop definitions
-internal static class BatteryInterop
+public static class BatteryInterop
 {
     // GUIDs
     public static readonly Guid GUID_DEVCLASS_BATTERY = new("72631e54-78a4-11d0-bcf6-00a0c9081ff6");
