@@ -5,6 +5,7 @@ Low-level Windows laptop battery analytics toolkit. Provides detailed metrics (d
 ## Features
 
 * Enumerate one or more battery packs (detachable / tablet scenarios supported)
+* Legacy fallback: probes `\\.\Battery0..3` if interface GUID enumeration yields none
 * Static info: Manufacturer, Serial, Device Name, Chemistry, Manufacture Date (if exposed)
 * Capacity data: Designed vs FullCharged -> Health %
 * Cycle Count (if firmware reports)
