@@ -29,7 +29,8 @@ internal static class BatteryInterop
     // Battery IOCTLs (from batclass.h)
     public const uint IOCTL_BATTERY_QUERY_TAG = 0x00294044;
     public const uint IOCTL_BATTERY_QUERY_INFORMATION = 0x00294048;
-    public const uint IOCTL_BATTERY_QUERY_STATUS = 0x0029404c; // correct value; set-information (0x00294050) not needed
+    // Correct QUERY_STATUS control code (previous 0x0029404c was SET_INFORMATION)
+    public const uint IOCTL_BATTERY_QUERY_STATUS = 0x00294050;
 
     // Battery info levels
     public enum BATTERY_QUERY_INFO_LEVEL : int
@@ -317,14 +318,15 @@ internal static class BatteryInterop
         }
     }
 
-    public static BatteryDevice[] EnumerateBatteries()
+    public static BatteryDevice[] EnumerateBatteries(bool debug = false)
     {
         var list = new System.Collections.Generic.List<BatteryDevice>();
         IntPtr h = IntPtr.Zero;
         try
         {
             var guid = GUID_DEVINTERFACE_BATTERY; // local copy because P/Invoke requires ref
-            h = SetupDiGetClassDevs(ref guid, IntPtr.Zero, IntPtr.Zero, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+            // DIGCF_DEVICEINTERFACE flag is already specified once; keep PRESENT to limit to current devices.
+            h = SetupDiGetClassDevs(ref guid, IntPtr.Zero, IntPtr.Zero, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
             if (h == IntPtr.Zero || h.ToInt64() == -1)
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "SetupDiGetClassDevs failed");
 
@@ -358,13 +360,15 @@ internal static class BatteryInterop
                 if (!SetupDiGetDeviceInterfaceDetail(h, ref ifData, detailData, detailData.Length, out required, IntPtr.Zero))
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "SetupDiGetDeviceInterfaceDetail failed");
 
-                // Device path is at offset 4 (32-bit) or 8 (64-bit)
-                int pathOffset = (IntPtr.Size == 8) ? 8 : 4;
+                // In practice the path begins immediately after cbSize (offset 4). Using 4 for both archs is safe.
+                int pathOffset = 4;
                 string devicePath = Marshal.PtrToStringAuto(Marshal.UnsafeAddrOfPinnedArrayElement(detailData, pathOffset)) ?? string.Empty;
+                if (debug) Console.WriteLine($"[debug] Interface {index} path='{devicePath}'");
 
                 var handle = CreateFile(devicePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
                 if (handle == IntPtr.Zero || handle.ToInt64() == -1)
                 {
+                    if (debug) Console.WriteLine($"[debug] CreateFile failed err={Marshal.GetLastWin32Error()} path='{devicePath}'");
                     index++;
                     continue; // skip if can't open
                 }
@@ -372,9 +376,11 @@ internal static class BatteryInterop
                 {
                     var dev = new BatteryDevice(devicePath, handle);
                     list.Add(dev);
+                    if (debug) Console.WriteLine($"[debug] Added device tag={dev.Tag} path='{devicePath}'");
                 }
-                catch
+                catch (Exception ex)
                 {
+                    if (debug) Console.WriteLine($"[debug] BatteryDevice init failed: {ex.Message}");
                     CloseHandle(handle);
                 }
 
@@ -386,6 +392,33 @@ internal static class BatteryInterop
             if (h != IntPtr.Zero && h.ToInt64() != -1)
                 SetupDiDestroyDeviceInfoList(h);
         }
-        return list.ToArray();
+        // Legacy fallback: some systems (certain OEM firmware) don't publish GUID_DEVINTERFACE_BATTERY.
+        if (list.Count == 0)
+        {
+            if (debug) Console.WriteLine("[debug] Trying legacy \\ \\ . \\ BatteryN fallback...");
+            for (int n = 0; n < 4; n++)
+            {
+                string legacyPath = @$"\\\\.\\Battery{n}"; // e.g. \\.\Battery0
+                var handle = CreateFile(legacyPath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+                if (handle == IntPtr.Zero || handle.ToInt64() == -1)
+                {
+                    if (debug) Console.WriteLine($"[debug] Legacy open failed n={n} err={Marshal.GetLastWin32Error()}");
+                    continue;
+                }
+                try
+                {
+                    var dev = new BatteryDevice(legacyPath, handle);
+                    list.Add(dev);
+                    if (debug) Console.WriteLine($"[debug] Legacy battery added tag={dev.Tag} path='{legacyPath}'");
+                }
+                catch (Exception ex)
+                {
+                    if (debug) Console.WriteLine($"[debug] Legacy battery init failed n={n} ex={ex.Message}");
+                    CloseHandle(handle);
+                }
+            }
+        }
+    if (debug && list.Count == 0) Console.WriteLine("[debug] No battery interfaces enumerated.");
+    return list.ToArray();
     }
 }
