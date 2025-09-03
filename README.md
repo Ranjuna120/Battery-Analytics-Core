@@ -1,19 +1,42 @@
 # Battery-Analytics-Core
 
-Low-level Windows laptop battery analytics toolkit. Provides detailed metrics (design/full charge capacity, health %, cycle count, temperature, chemistry, live rate/voltage, multi‑battery enumeration) using the Windows Battery Class Driver (`DeviceIoControl` + `IOCTL_BATTERY_*`).
+Low-level + modern UI battery analytics toolkit for Windows laptops. Collects detailed pack telemetry (design / full charge capacity, health %, cycle count, temperature, chemistry, live power, voltage, state) using the Windows Battery Class Driver (`DeviceIoControl` + `IOCTL_BATTERY_*`) with layered fallbacks (legacy device paths, WinRT aggregate, WMI) and a WPF dashboard (gradient theme, dark mode, tray icon, history sparkline, toast alerts).
 
-## Features
+## Key Features
 
-* Enumerate one or more battery packs (detachable / tablet scenarios supported)
-* Legacy fallback: probes `\\.\Battery0..3` if interface GUID enumeration yields none
-* Static info: Manufacturer, Serial, Device Name, Chemistry, Manufacture Date (if exposed)
-* Capacity data: Designed vs FullCharged -> Health %
-* Cycle Count (if firmware reports)
-* Temperature (0.1 K -> °C) when supported
-* Live status polling: RemainingCapacity, Rate (mW, sign indicates direction), Voltage, PowerState flags
-* Graceful handling of unsupported queries (best‑effort)
+Core (Console):
+* Native Battery Class Driver interop (IOCTL_BATTERY_QUERY_*)
+* Multi‑battery enumeration + legacy fallback (`\\.\BatteryN`)
+* Static info: manufacturer, serial, name, chemistry, manufacture date, cycle count
+* Health % (FullChargedCapacity / DesignedCapacity) & temperature (if supported)
+* Live dynamic status: remaining capacity, rate (mW), voltage, flags, ETA to empty
+* CSV logging & Prometheus metrics exporter
+* Alerts (temperature / health) + graceful degradation when data missing
+* Re‑enumeration option to cope with docking / hot‑swap
 
-## Quick Start
+UI (WPF Desktop):
+* Modern gradient glass style + accent palette
+* Dark mode toggle (custom switch) & semi‑transparent cards
+* Real‑time sparkline (last 5 min charge %)
+* Tray icon (minimize to tray) & context menu (Start / Stop / Refresh / Exit)
+* Balloon (toast style) alerts (high temperature / low health)
+* Auto percentage + charging/discharging tooltip
+* Theming resources isolated under `Themes/Colors.xaml` for easy customization
+
+Fallback Providers:
+* WinRT `Windows.Devices.Power.Battery.AggregateBattery`
+* WMI `Win32_Battery` (charge %, design voltage, runtime estimation)
+
+## Project Structure
+
+```
+src/
+	BatteryMonitor/            # Core console & exporters (CSV, Prometheus, alerts)
+	BatteryMonitor.UI/         # WPF UI (gradient, tray, history, theming)
+		Themes/Colors.xaml       # Palette + styles (buttons, datagrid, switch)
+```
+
+## Quick Start (Console)
 
 ```powershell
 cd src/BatteryMonitor
@@ -45,7 +68,21 @@ Device: \\?\BAT#DEV_...#...
 
 Press Ctrl+C to stop polling.
 
-## CLI Options
+## Quick Start (UI)
+
+```powershell
+cd src/BatteryMonitor.UI
+dotnet run
+```
+
+Usage:
+* Set interval -> Start to begin polling; Stop halts.
+* Toggle dark mode switch for dark/light.
+* Minimize window -> sent to tray (double‑click icon to restore).
+* Right‑click tray icon for menu.
+* History card updates each tick (5‑minute sliding window).
+
+## CLI Options (Console)
 
 ```text
 --interval <sec>       Polling interval seconds (default 5)
@@ -73,6 +110,32 @@ dotnet run -- --interval 5 --high-temp 55 --low-health 75
 # Re-enumerate every 60 cycles (~5 min if interval=5)
 dotnet run -- --reenum 60
 ```
+
+## CSV Schema
+
+CSV columns written (append mode):
+
+```
+TimestampUtc,Device,Remaining_mWh,Rate_mW,Voltage_mV,Temperature_C,Health_pct,Designed_mWh,Full_mWh,CycleCount
+```
+
+Notes:
+* Temperature / Health blank if unknown.
+* Multiple batteries produce one row per device per poll.
+
+## Prometheus Metrics
+
+Metric names (labels: device):
+
+| Metric | Description |
+|--------|-------------|
+| `battery_remaining_mwh` | Remaining capacity (mWh) |
+| `battery_rate_mw` | Current rate (+ charge / - discharge) |
+| `battery_voltage_mv` | Pack voltage (mV) |
+| `battery_temperature_c` | Temperature (°C, if reported) |
+| `battery_health_pct` | Health percentage (if computable) |
+
+Endpoint: `http://localhost:<port>/metrics` when `--http <port>` is supplied.
 
 ## Data Interpretation
 
@@ -102,6 +165,19 @@ Estimated time to empty (if discharging): `RemainingCapacity (mWh) / |Rate| (mW)
 5. Live status via `IOCTL_BATTERY_QUERY_STATUS` (rate, remaining capacity, voltage, power state).
 6. Helpers convert raw bytes to strongly typed records; errors are localized to each query.
 
+## UI Theming
+
+Edit `Themes/Colors.xaml` to customize:
+* Accent & gradient colors (`AccentColor`, `GradientStartColor`, `GradientEndColor`)
+* Light/Dark brush mappings (`BgColor`, `FgColor`, `PanelBgLight/Dark`, etc.)
+* Button styles: `PrimaryButton`, `SecondaryButton`, `GhostButton`, `SwitchToggle`
+
+Minimal example (change accent):
+```xml
+<Color x:Key="AccentColor">#FF00C2A8</Color>
+```
+Rebuild or just save — WPF resource updates at runtime for many elements.
+
 ## Limitations
 
 * Some firmware blocks particular info levels (returns ERROR_INVALID_FUNCTION / NOT_SUPPORTED).
@@ -109,18 +185,26 @@ Estimated time to empty (if discharging): `RemainingCapacity (mWh) / |Rate| (mW)
 * Values can transiently fail if battery not ready (Tag becomes 0); re-enumerate if needed.
 * Health % meaningless if design or full charge capacity is 0.
 
-## Roadmap / Extension Ideas
+## Status & Roadmap
 
+Implemented:
+* Native + legacy enumeration
+* WinRT + WMI fallbacks
+* Health / temperature / cycle count extraction
+* CSV logging & Prometheus export
+* Alerts (temp / health) & tray notifications
+* WPF UI (history sparkline, tray, dark mode, gradient theme, modern buttons)
+
+Possible Next Enhancements:
 | Area | Idea |
 |------|------|
-| Logging | Periodic snapshots -> CSV / SQLite for trend & health decay graph |
-| Alerts | High temperature, health threshold, sudden capacity drop notifications (Toast) |
-| UI | WPF/WinUI dashboard with charts (LiveCharts / ScottPlot) & tray icon |
-| Export | Minimal Web API / Prometheus metrics endpoint |
-| Aggregation | Combine multiple batteries (sum mWh; compute overall health) |
-| Cache | Persist first seen DesignedCapacity to mitigate disappearing OEM data |
-| Calibration | Detect anomalies, suggest full discharge/charge cycle |
-| Plugin | Abstraction for alternative data sources (WinRT, WMI fallback) |
+| Charts | Add capacity decay trend (SQLite + retention) |
+| UI | Circular gauge + battery icon set per state |
+| Export | InfluxDB / OpenTelemetry exporter |
+| Packaging | MSIX or standalone single-file publish |
+| Analytics | Degradation rate projection / anomaly detection |
+| Calibration | Suggest recalibration cycles & track results |
+| Plugin | Additional sensors (EC SMBus, ACPI evaluation) |
 
 ## Troubleshooting
 
@@ -132,9 +216,18 @@ Estimated time to empty (if discharging): `RemainingCapacity (mWh) / |Rate| (mW)
 | Cycle count 0 | Not reported | Can't infer reliably |
 | Access denied | Rare permission issue | Try elevated (Run as Administrator) |
 
+## Solution File (Optional)
+
+To generate a solution for IDE convenience:
+```powershell
+dotnet new sln -n BatteryAnalytics
+dotnet sln add .\src\BatteryMonitor\BatteryAnalyticsCore.csproj
+dotnet sln add .\src\BatteryMonitor.UI\BatteryMonitor.UI.csproj
+```
+
 ## License
 
 MIT (add a LICENSE file if distributing). Contributions welcome.
 
 ---
-Generated initial core by automation. Extend responsibly.
+Generated initial core + UI by automation. Extend responsibly.
