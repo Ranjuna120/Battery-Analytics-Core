@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "TqjJEAtChq8=",
+  "success": true,
+  "projectFilePath": "E:\\gitupload\\uploadgit\\Battery-Analytics-Core\\src\\BatteryMonitor\\BatteryAnalyticsCore.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Rivith\\.nuget\\packages\\system.codedom\\7.0.0\\system.codedom.7.0.0.nupkg.sha512",
+    "C:\\Users\\Rivith\\.nuget\\packages\\system.management\\7.0.0\\system.management.7.0.0.nupkg.sha512",
+    "C:\\Users\\Rivith\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.19041.55\\microsoft.windows.sdk.net.ref.10.0.19041.55.nupkg.sha512"
+  ],
+  "logs": []
+}
