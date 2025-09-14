@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("BatteryAnalyticsCore")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d8c7e5382aadb8999f21b2a8e695e1c3e5290761")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7c1fa8485ce9dbbabab883684e56263d7aed4b7a")]
 [assembly: System.Reflection.AssemblyProductAttribute("BatteryAnalyticsCore")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BatteryAnalyticsCore")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
