@@ -27,6 +27,19 @@ Fallback Providers:
 * WinRT `Windows.Devices.Power.Battery.AggregateBattery`
 * WMI `Win32_Battery` (charge %, design voltage, runtime estimation)
 
+## Prerequisites
+
+- Windows 10/11
+- .NET SDK 7.0 (including Windows Desktop component for WPF)
+- PowerShell 5.1+ (default on Windows)
+- Optional: Visual Studio 2022 (with .NET desktop development workload)
+
+Verify SDK:
+
+```powershell
+dotnet --info | Select-String "Version: 7"
+```
+
 ## Project Structure
 
 ```
@@ -34,6 +47,28 @@ src/
 	BatteryMonitor/            # Core console & exporters (CSV, Prometheus, alerts)
 	BatteryMonitor.UI/         # WPF UI (gradient, tray, history, theming)
 		Themes/Colors.xaml       # Palette + styles (buttons, datagrid, switch)
+```
+
+If `src/` does not exist yet, use the bootstrap below to scaffold starter projects.
+
+## Bootstrap (Scaffold Projects)
+
+This repo may only contain the documentation initially. Generate a runnable skeleton:
+
+```powershell
+# From repo root
+mkdir src -Force
+
+# Console app (core)
+dotnet new console -n BatteryMonitor -o .\src\BatteryMonitor -f net7.0
+
+# WPF UI app (Windows Desktop)
+dotnet new wpf -n BatteryMonitor.UI -o .\src\BatteryMonitor.UI -f net7.0-windows
+
+# Optional solution for IDEs
+dotnet new sln -n BatteryAnalytics
+dotnet sln add .\src\BatteryMonitor\BatteryMonitor.csproj
+dotnet sln add .\src\BatteryMonitor.UI\BatteryMonitor.UI.csproj
 ```
 
 ## Quick Start (Console)
@@ -81,6 +116,38 @@ Usage:
 * Minimize window -> sent to tray (double‑click icon to restore).
 * Right‑click tray icon for menu.
 * History card updates each tick (5‑minute sliding window).
+
+## Build, Run, Publish
+
+Console (build/run):
+
+```powershell
+cd .\src\BatteryMonitor
+dotnet build
+dotnet run -- --once
+```
+
+Console (single-file publish):
+
+```powershell
+cd .\src\BatteryMonitor
+dotnet publish -c Release -r win-x64 -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --self-contained false
+```
+
+WPF UI (build/run):
+
+```powershell
+cd .\src\BatteryMonitor.UI
+dotnet build
+dotnet run
+```
+
+WPF UI (publish):
+
+```powershell
+cd .\src\BatteryMonitor.UI
+dotnet publish -c Release -r win-x64 -f net7.0-windows --self-contained false
+```
 
 ## CLI Options (Console)
 
@@ -215,6 +282,29 @@ Possible Next Enhancements:
 | Temperature always n/a | Firmware not exposing | Expected on many models |
 | Cycle count 0 | Not reported | Can't infer reliably |
 | Access denied | Rare permission issue | Try elevated (Run as Administrator) |
+| `The framework 'Microsoft.WindowsDesktop.App' was not found` | Missing Windows Desktop SDK | Install .NET 7 Desktop Runtime/SDK or VS 2022 desktop workload |
+| WPF publish fails trimming | Trimmer removes desktop bits | Use `--self-contained false` and avoid trimming for WPF |
+| Running in VM gives 0 values | ACPI not virtualized | Test on real hardware; VMs often hide battery |
+| Net 8 warnings | SDK not installed | Stay on .NET 7 or install .NET 8 SDK |
+
+## Screenshots
+
+Add images of the UI cards, dark mode, and tray tooltip here.
+
+```
+docs/
+	screenshots/
+		dashboard-light.png
+		dashboard-dark.png
+		tray-tooltip.png
+```
+
+## Contributing
+
+- Open an issue to discuss changes.
+- Keep PRs focused and small.
+- Match existing style for docs and code.
+- Test on Windows 10/11 physical hardware when touching battery code.
 
 ## Solution File (Optional)
 
